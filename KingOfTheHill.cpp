@@ -23,17 +23,17 @@ vector<vector<char>> original_grid(GRID_SIZE, vector<char>(GRID_SIZE)); // Resta
 // Variáveis compartilhadas entre as threads
 vector<vector<char>> grid(GRID_SIZE, vector<char>(GRID_SIZE)); // Estado atual do tabuleiro
 vector<pair<int, int>> players = {{0, 0}, {GRID_SIZE - 1, GRID_SIZE - 1}}; // Posição de cada jogador no tabuleiro
-condition_variable zone_cv; // Sinaliza quando um jogador entra na zona
 bool game_over = false; // Indica que o jogo terminou
 vector<queue<char>> player_queue(2); // Uma fila que guarda a sequência de movimentos de cada jogador
 condition_variable queue_cv; // Sinaliza um novo input na fila de movimentos
+condition_variable zone_cv; // Sinaliza quando um jogador entra na zona
 int zone_state = -1; // -1 = zona vazia, 0 = jogador 0 está na zona, 1 = jogador 1 está na zona
+int zone_change_counter = 0; // Contador para mudança de estado. É usado para acordar a zone_thread.
 
 // Mutex que atua como um semáforo binário e controla o acesso das threads às variáveis compartilhadas
 mutex semaforo;
 
 void draw_board(void) {
-    lock_guard<mutex> lock(semaforo);
     clear();
     cout << separator << endl;
     for (int i = 0; i < GRID_SIZE; i++) {
@@ -126,10 +126,15 @@ void zone_thread() {
 
         // Zona está ocupada
         last_winning_player = zone_state;
-        auto win_time = std::chrono::steady_clock::now() + WIN_DURATION;
+        auto win_time = chrono::steady_clock::now() + WIN_DURATION;
+
         // Espera uma interrupção ou o tempo para a vitória do jogador
-        bool interruption = zone_cv.wait_until(lock, win_time, [last_winning_player]{return zone_state != last_winning_player || game_over;});
+        int last_counter = zone_change_counter; // Guarda o último número de mudanças no estado da zona
+        bool interruption = zone_cv.wait_until(lock, win_time, [last_counter, win_time]{ // Acorda se houve uma mudança no estado da zona
+            return zone_change_counter != last_counter || game_over;});
+
         if(game_over) break;
+
         if(!interruption) {
             cout << "JOGADOR " << last_winning_player << " VENCEU!\n";
             game_over = true;
@@ -146,52 +151,52 @@ void zone_thread() {
 
 void player_thread(bool player_id) {
     while(!game_over) {
-        {
-            unique_lock<mutex> lock(semaforo);
+        unique_lock<mutex> lock(semaforo);
 
-            // Aguarda até que a fila não esteja vazia OU que o jogo termine
-            queue_cv.wait(lock, [player_id]{return !player_queue[player_id].empty() || game_over;}); 
-                
-            if(game_over) break;
+        // Aguarda até que a fila não esteja vazia OU que o jogo termine
+        queue_cv.wait(lock, [player_id]{return !player_queue[player_id].empty() || game_over;}); 
+            
+        if(game_over) break;
 
-            char move = player_queue[player_id].front();
-            player_queue[player_id].pop();
+        char move = player_queue[player_id].front();
+        player_queue[player_id].pop();
 
-            // Registra o movimento
-            int r = players[player_id].first;
-            int c = players[player_id].second;
-            switch (move) {
-                case 'w': r = (r == 0) ? (GRID_SIZE - 1) : r - 1; break;
-                case 's': r = (r + 1) % GRID_SIZE; break;
-                case 'a': c = (c == 0) ? (GRID_SIZE - 1) : c - 1; break;
-                case 'd': c = (c + 1) % GRID_SIZE; break;
-                default: break;   
-            }    
+        // Registra o movimento
+        int r = players[player_id].first;
+        int c = players[player_id].second;
+        switch (move) {
+            case 'w': r = (r == 0) ? (GRID_SIZE - 1) : r - 1; break;
+            case 's': r = (r + 1) % GRID_SIZE; break;
+            case 'a': c = (c == 0) ? (GRID_SIZE - 1) : c - 1; break;
+            case 'd': c = (c + 1) % GRID_SIZE; break;
+            default: break;   
+        }    
 
-            // Empurra o jogador
-            if(grid[r][c] != ' ' && grid[r][c] != '*')
-                push_player(r, c, move, grid[r][c]);
+        // Empurra o jogador
+        if(grid[r][c] != ' ' && grid[r][c] != '*')
+            push_player(r, c, move, grid[r][c]);
 
-            // Atualiza o tabuleiro
-            grid[r][c] = player_id + '0';
-            grid[players[player_id].first][players[player_id].second] = original_grid[players[player_id].first][players[player_id].second];
-            players[player_id] = {r, c};   
+        // Atualiza o tabuleiro
+        grid[r][c] = player_id + '0';
+        grid[players[player_id].first][players[player_id].second] = original_grid[players[player_id].first][players[player_id].second];
+        players[player_id] = {r, c};   
 
-            // Verificação do estado atual da zona
-            bool p0_inside = in_zone(0);
-            bool p1_inside = in_zone(1);
-            if(!p0_inside && !p1_inside) { // Nenhum jogador dentro da zona
-                zone_state = -1;
-                lock.unlock();
-                zone_cv.notify_one();
-            } // Pelo menos 1 jogador está na zona
-            else if(zone_state == -1 || !in_zone(zone_state)) { // Caso a zona esteja vazia ou o jogador saia de dentro da zona
-                if(p0_inside) zone_state = 0;
-                else zone_state = 1;
-                lock.unlock();
-                zone_cv.notify_one();
-            }
-        } // Unlock automático (fora de escopo)
+        // Verificação do estado atual da zona
+        bool p0_inside = in_zone(0);
+        bool p1_inside = in_zone(1);
+        if(!p0_inside && !p1_inside) { 
+            zone_state = -1;
+            zone_change_counter++;
+            lock.unlock();
+            zone_cv.notify_one();
+        } 
+        else if(zone_state == -1 || !in_zone(zone_state)) { 
+            if(p0_inside) zone_state = 0;
+            else zone_state = 1;
+            zone_change_counter++;
+            lock.unlock();
+            zone_cv.notify_one();
+        }
         draw_board();
     }
 }
