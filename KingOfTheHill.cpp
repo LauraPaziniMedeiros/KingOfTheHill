@@ -9,9 +9,14 @@
 #include <chrono>
 using namespace std;
 
-// Configurações
+// Configurações do tabuleiro
 #define GRID_SIZE 10
-#define ZONE_SIZE 4
+#define ZONE_SIZE 3
+
+// Configurações do terminal
+const string RED_COLOR = "\x1B[31m";
+const string RESET_COLOR = "\x1B[0m";
+
 const chrono::seconds WIN_DURATION{5}; // Tempo mínimo dentro da zona para a vitória
 
 // Constantes
@@ -36,10 +41,17 @@ mutex semaforo;
 void draw_board(void) {
     clear();
     cout << separator << endl;
+
     for (int i = 0; i < GRID_SIZE; i++) {
         cout << "| ";
         for (int j = 0; j < GRID_SIZE; j++) {
-            cout << grid[i][j] << " | ";
+            if (grid[i][j] == '*') {
+                // Escreve a área crítica em vermelho, depois volta para a cor padrão
+                cout << RED_COLOR << grid[i][j] << RESET_COLOR << " | ";
+            } else {
+                cout << grid[i][j] << " | ";
+            }
+            
         }
         cout << endl << separator << endl;
     }

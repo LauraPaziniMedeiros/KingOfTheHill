@@ -36,7 +36,11 @@ char get_immediate_input() {
 }
 
 void clear() {
-    // CSI[2J clears screen, CSI[H moves the cursor to top-left corner
-    std::cout << "\x1B[2J\x1B[H";
+    // \x1B[2J  -> Limpa a tela visível
+    // \x1B[3J  -> Limpa o histórico de prints
+    // \x1B[H   -> Volta o cursor para o início
+    std::cout << "\x1B[2J\x1B[3J\x1B[H"; 
+    
+    std::cout << std::flush;
 }
 #endif
