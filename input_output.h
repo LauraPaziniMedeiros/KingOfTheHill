@@ -1,8 +1,8 @@
 #ifdef _WIN32
-#include <conio.h> // Windows header for _getch()
+#include <conio.h>
 
 char get_immediate_input() {
-    return _getch(); // Windows function to get char immediately
+    return _getch();
 }
 
 #else
@@ -11,29 +11,29 @@ char get_immediate_input() {
 #include <stdio.h>
 #include <iostream>
 
-// Linux/macOS implementation using termios
 char get_immediate_input() {
     struct termios oldt, newt;
     int ch;
     
-    // 1. Get current terminal settings
+    // Guarda as configurações atuais do terminal
     tcgetattr(STDIN_FILENO, &oldt);
     newt = oldt;
     
-    // 2. Disable canonical mode (buffered i/o) and echo
+    // Desativa o modo padrão (evita esperar Enter) e desativa o eco na tela
     newt.c_lflag &= ~(ICANON | ECHO);
     
-    // 3. Apply new settings
+    // Aplica as novas configurações imediatamente
     tcsetattr(STDIN_FILENO, TCSANOW, &newt);
     
-    // 4. Read the character
+    // Lê um caracter imediatamente do teclado
     ch = getchar();
     
-    // 5. Restore old settings (important!)
+    // Restaura as configurações originais do terminal
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     
-    return ch;
+    return ch; // Retorna o caracter lido
 }
+
 
 void clear() {
     // \x1B[2J  -> Limpa a tela visível

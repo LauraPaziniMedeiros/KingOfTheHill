@@ -216,10 +216,8 @@ void zone_thread() {
         }
         else {
             // Envia mensagem de saída da zona para a thread de print
-            {
-                lock_guard<mutex> print_lock(print_mtx);
-                print_queue.push({PLAYER_LEFT_ZONE, last_winning_player});
-            }
+            lock_guard<mutex> print_lock(print_mtx);
+            print_queue.push({PLAYER_LEFT_ZONE, last_winning_player});
             print_cv.notify_one();
             
             last_winning_player = -1;
