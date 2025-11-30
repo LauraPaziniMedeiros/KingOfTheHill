@@ -44,15 +44,11 @@ mutex player_mtx; // Atua como um semáforo binário
 
 // Variáveis relacionadas à sinalização de fim de jogo entre as threads
 bool game_over = false; // Indica que o jogo terminou
+bool win = false; // Indica que o último jogador na zona venceu
 mutex gameover_mtx; // Atua como um semáforo binário
 
 // Variáveis relacionadas ao output do estado do jogo
-enum PrintType { BOARD, PLAYER_LEFT_ZONE, PLAYER_WON };
-struct PrintMessage {
-    PrintType type;
-    int player_id;
-};
-queue<PrintMessage> print_queue;
+bool print = false; // Alterada para true quando uma escrita é requisitada
 condition_variable print_cv; // Sinaliza uma requisição de escrita no terminal
 mutex print_mtx; // Atua como um semáforo binário
 
@@ -125,35 +121,35 @@ bool in_zone(bool player_id) {
 
 void print_thread(void) {
     while(!game_over) {
-        unique_lock<mutex> lock(print_mtx);
-        
-        // Aguarda até que haja algo na fila de print ou o jogo termine
-        print_cv.wait(lock, [] {return !print_queue.empty() || game_over;});
-        
-        {
-            unique_lock gameover_lock(gameover_mtx);
-            if(game_over) break; 
+        unique_lock<mutex> print_lock(print_mtx);
+        // Aguarda um sinal para imprimir uma atualização no estado do jogo
+        print_cv.wait(print_lock, []{return print || game_over || win;});
+
+        { // Verifica se o jogo foi interrompido sem uma vitória
+            unique_lock<mutex> gameover_lock(gameover_mtx);
+            if(game_over && !win) break; 
         }
-        
-        if(!print_queue.empty()) {
-            PrintMessage msg = print_queue.front();
-            print_queue.pop();
-            
-            lock.unlock(); // Libera o mutex antes de imprimir
-            
-            // Processa a mensagem de acordo com o tipo
-            switch(msg.type) {
-                case BOARD:
-                    draw_board();
-                    break;
-                case PLAYER_LEFT_ZONE:
-                    cout << "JOGADOR " << msg.player_id << " SAIU DA ZONA!\n";
-                    break;
-                case PLAYER_WON:
-                    cout << "JOGADOR " << msg.player_id << " VENCEU!\n";
-                    break;
+        { // Desenha o tabuleiro atual
+            unique_lock<mutex> player_lock(player_mtx);
+            draw_board();
+        }
+        { // Verifica a condição de vitória e imprime o estado atual da zona
+            unique_lock<mutex> gameover_lock(gameover_mtx);
+            if(win) {
+                unique_lock<mutex> zone_lock(zone_mtx);
+                if(zone_state != -1) {
+                    cout << "JOGADOR " << zone_state << " VENCEU! PRESSIONE [ENTER] PARA SAIR.\n";
+                }
+                break;
             }
+            else {
+                unique_lock<mutex> zone_lock(zone_mtx);
+                if(zone_state != -1)
+                    cout << "JOGADOR " << zone_state << " ESTÁ NA ZONA!\n";
+            }
+            if(game_over) break;
         }
+        print = false; // Reinicializa a variável de impressão
     }
 }
 
@@ -196,7 +192,7 @@ void zone_thread() {
         zone_cv.wait(zone_lock, [] {return zone_state != -1 || game_over;});
 
         {
-            unique_lock gameover_lock(gameover_mtx);
+            unique_lock<mutex> gameover_lock(gameover_mtx);
             if(game_over) break; 
         }
 
@@ -210,33 +206,28 @@ void zone_thread() {
             return zone_change_counter != last_counter || game_over;});
 
         {
-            unique_lock gameover_lock(gameover_mtx);
+            unique_lock<mutex> gameover_lock(gameover_mtx);
             if(game_over) break; 
         }
 
-        if(!interruption) {
-            // Envia mensagem de vitória para a thread de print
-            lock_guard<mutex> print_lock(print_mtx);
-            print_queue.push({PLAYER_WON, last_winning_player});
-            print_cv.notify_one();
-            { // Atualiza a variável game over
+        if(!interruption && last_winning_player == zone_state) {
+            { // Atualiza as variáveis de fim de jogo
                 unique_lock gameover_lock(gameover_mtx);
-                game_over = true; 
+                game_over = true;
+                win = true;
             }
+            // Envia mensagem de vitória para a thread de print
+            {
+                lock_guard<mutex> print_lock(print_mtx);
+                print = true;
+            }
+            print_cv.notify_all();
             // Notifica todas as threads em espera que o jogo terminou
             zone_lock.unlock();
             queue_cv.notify_all();
-            print_cv.notify_all();
         }
-        else {
-            // Envia mensagem de saída da zona para a thread de print
-            {
-                lock_guard<mutex> print_lock(print_mtx);
-                print_queue.push({PLAYER_LEFT_ZONE, last_winning_player});
-            }
-            print_cv.notify_one();
-            
-            last_winning_player = -1;
+        else { // Reinicializa a zona            
+            last_winning_player = zone_state;
             zone_lock.unlock();
         }
     }
@@ -250,7 +241,7 @@ void player_thread(bool player_id) {
         queue_cv.wait(player_lock, [player_id]{return !player_queue[player_id].empty() || game_over;}); 
             
         {
-            unique_lock gameover_lock(gameover_mtx);
+            unique_lock<mutex> gameover_lock(gameover_mtx);
             if(game_over) break; 
         }
 
@@ -277,27 +268,29 @@ void player_thread(bool player_id) {
         grid[players[player_id].first][players[player_id].second] = original_grid[players[player_id].first][players[player_id].second];
         players[player_id] = {r, c};   
 
-        // Verificação do estado atual da zona
-        unique_lock<mutex> zone_lock(zone_mtx);
-        bool p0_inside = in_zone(0);
-        bool p1_inside = in_zone(1);
-        if(!p0_inside && !p1_inside) { 
-            zone_state = -1;
-            zone_change_counter++;
-            zone_lock.unlock();
-            zone_cv.notify_one();
-        } 
-        else if(zone_state == -1 || !in_zone(zone_state)) { 
-            if(p0_inside) zone_state = 0;
-            else zone_state = 1;
-            zone_change_counter++;
-            zone_lock.unlock();
-            zone_cv.notify_one();
+        { // Verificação do estado atual da zona
+            unique_lock<mutex> zone_lock(zone_mtx);
+            bool p0_inside = in_zone(0);
+            bool p1_inside = in_zone(1);
+            if(!p0_inside && !p1_inside) { // Nenhum dos jogadores está na zona
+                zone_state = -1;
+                // zone_change_counter++;
+                zone_lock.unlock();
+                zone_cv.notify_one();
+            } // Pelo menos um dos jogadores está na zona
+            else if(zone_state == -1 || !in_zone(zone_state)) { // Atualiza o zone_state se a zona estiver livre
+                if(p0_inside) zone_state = 0;
+                else zone_state = 1;
+                zone_change_counter++;
+                zone_lock.unlock();
+                zone_cv.notify_one();
+            }
         }
         
-        // Envia mensagem para desenhar o tabuleiro
-        lock_guard<mutex> print_lock(print_mtx);
-        print_queue.push({BOARD, -1});
+        { // Imprime a mudança de estado no jogo
+            unique_lock<mutex> print_lock(print_mtx);
+            print = true;
+        }
         print_cv.notify_one();
     }
 }
