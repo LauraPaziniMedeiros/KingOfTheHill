@@ -9,7 +9,8 @@
 #include <chrono>
 using namespace std;
 
-// Configurações do tabuleiro
+/*************** CONFIGURAÇÕES ***************/
+
 #define GRID_SIZE 11
 #define ZONE_SIZE 3
 
@@ -19,23 +20,33 @@ const string RESET_COLOR = "\x1B[0m";
 
 const chrono::seconds WIN_DURATION{5}; // Tempo mínimo dentro da zona para a vitória
 
-// Constantes
+/*************** CONSTANTES ***************/
+
 const int zone_start = (GRID_SIZE - ZONE_SIZE) / 2;
 const int zone_end = zone_start + ZONE_SIZE;
 string separator = "-";
 vector<vector<char>> original_grid(GRID_SIZE, vector<char>(GRID_SIZE)); // Restaura valores originais na movimentação
 
-// Variáveis compartilhadas entre as threads
-vector<vector<char>> grid(GRID_SIZE, vector<char>(GRID_SIZE)); // Estado atual do tabuleiro
-vector<pair<int, int>> players = {{0, 0}, {GRID_SIZE - 1, GRID_SIZE - 1}}; // Posição de cada jogador no tabuleiro
-bool game_over = false; // Indica que o jogo terminou
-vector<queue<char>> player_queue(2); // Uma fila que guarda a sequência de movimentos de cada jogador
-condition_variable queue_cv; // Sinaliza um novo input na fila de movimentos
+/*************** VARIÁVEIS COMPARTILHADAS (ZONAS CRÍTCAS) ***************/
+
+// Variáveis relacionadas à zona do jogo
 condition_variable zone_cv; // Sinaliza quando um jogador entra na zona
 int zone_state = -1; // -1 = zona vazia, 0 = jogador 0 está na zona, 1 = jogador 1 está na zona
 int zone_change_counter = 0; // Contador para mudança de estado. É usado para acordar a zone_thread.
+mutex zone_mtx; // Atua como um semáforo binário
 
-// Variáveis para a thread de print
+// Variáveis relacionadas ao input e lógica de movimentação dos jogadores
+vector<vector<char>> grid(GRID_SIZE, vector<char>(GRID_SIZE)); // Estado atual do tabuleiro
+vector<pair<int, int>> players = {{0, 0}, {GRID_SIZE - 1, GRID_SIZE - 1}}; // Posição de cada jogador no tabuleiro
+vector<queue<char>> player_queue(2); // Fila que guarda a sequência de movimentos de cada jogador
+condition_variable queue_cv; // Sinaliza um novo input na fila de movimentos
+mutex player_mtx; // Atua como um semáforo binário
+
+// Variáveis relacionadas à sinalização de fim de jogo entre as threads
+bool game_over = false; // Indica que o jogo terminou
+mutex gameover_mtx; // Atua como um semáforo binário
+
+// Variáveis relacionadas ao output do estado do jogo
 enum PrintType { BOARD, PLAYER_LEFT_ZONE, PLAYER_WON };
 struct PrintMessage {
     PrintType type;
@@ -43,13 +54,11 @@ struct PrintMessage {
 };
 queue<PrintMessage> print_queue;
 condition_variable print_cv; // Sinaliza uma requisição de escrita no terminal
+mutex print_mtx; // Atua como um semáforo binário
 
-// Mutex que atuam como semáforos binários e controlam o acesso das threads às variáveis compartilhadas
-mutex gameover_mtx;
-mutex player_mtx;
-mutex zone_mtx;
-mutex print_mtx;
+/*************** FUNÇÕES AUXILIARES ***************/
 
+// Desenha o estado atual do tabuleiro
 void draw_board(void) {
     clear();
     cout << separator << endl;
@@ -70,6 +79,7 @@ void draw_board(void) {
     return;
 }
 
+// Inicializa o tabuleiro antes do jogo começar
 void initialize_grid(void) {
     for(int i = 0; i < GRID_SIZE; i++) {
         for(int j = 0; j < GRID_SIZE; j++) {
@@ -89,6 +99,29 @@ void initialize_grid(void) {
     draw_board();
     return;
 }
+
+// Empurra o jogador adjacente à movimentação de outro jogador
+void push_player(int r, int c, char direction, char player) {
+    switch (direction) {
+        case 'w': r = (r == 0) ? (GRID_SIZE - 1) : r - 1; break;
+        case 's': r = (r + 1) % GRID_SIZE; break;
+        case 'a': c = (c == 0) ? (GRID_SIZE - 1) : c - 1; break;
+        case 'd': c = (c + 1) % GRID_SIZE; break;
+        default: break;
+    }
+    grid[r][c] = player;
+    players[player - '0'] = {r, c};
+}
+
+// Retorna TRUE se o jogador está dentro da zona, FALSE caso contrário
+bool in_zone(bool player_id) {
+    if(player_id == -1) return false;
+    int x = players[player_id].first;
+    int y = players[player_id].second;
+    return x >= zone_start && x < zone_end && y >= zone_start && y < zone_end;
+}
+
+/*************** THREADS ***************/
 
 void print_thread(void) {
     while(!game_over) {
@@ -155,25 +188,6 @@ void input_thread(void) {
     }
 }
 
-void push_player(int r, int c, char direction, char player) {
-    switch (direction) {
-        case 'w': r = (r == 0) ? (GRID_SIZE - 1) : r - 1; break;
-        case 's': r = (r + 1) % GRID_SIZE; break;
-        case 'a': c = (c == 0) ? (GRID_SIZE - 1) : c - 1; break;
-        case 'd': c = (c + 1) % GRID_SIZE; break;
-        default: break;
-    }
-    grid[r][c] = player;
-    players[player - '0'] = {r, c};
-}
-
-bool in_zone(bool player_id) {
-    if(player_id == -1) return false;
-    int x = players[player_id].first;
-    int y = players[player_id].second;
-    return x >= zone_start && x < zone_end && y >= zone_start && y < zone_end;
-}
-
 void zone_thread() {
     int last_winning_player = -1;
     while(!game_over) {
@@ -216,8 +230,10 @@ void zone_thread() {
         }
         else {
             // Envia mensagem de saída da zona para a thread de print
-            lock_guard<mutex> print_lock(print_mtx);
-            print_queue.push({PLAYER_LEFT_ZONE, last_winning_player});
+            {
+                lock_guard<mutex> print_lock(print_mtx);
+                print_queue.push({PLAYER_LEFT_ZONE, last_winning_player});
+            }
             print_cv.notify_one();
             
             last_winning_player = -1;
@@ -287,19 +303,20 @@ void player_thread(bool player_id) {
 }
 
 int main() {
+    // Iniciaiza o tabuleiro antes do jogo começar
     initialize_grid();
     
     thread t_print(print_thread);
-    thread t(input_thread);
-    thread t1(player_thread, 0);
-    thread t2(player_thread, 1);
-    thread t3(zone_thread);
+    thread t_input(input_thread);
+    thread t_player0(player_thread, 0);
+    thread t_player1(player_thread, 1);
+    thread t_zone(zone_thread);
     
-    t.join();
-    t1.join();
-    t2.join();
-    t3.join();
     t_print.join();
+    t_input.join();
+    t_player0.join();
+    t_player1.join();
+    t_zone.join();
 
     return 0;
 }
