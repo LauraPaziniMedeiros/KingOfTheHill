@@ -10,7 +10,7 @@
 using namespace std;
 
 // Configurações do tabuleiro
-#define GRID_SIZE 10
+#define GRID_SIZE 11
 #define ZONE_SIZE 3
 
 // Configurações do terminal
@@ -86,11 +86,7 @@ void initialize_grid(void) {
     grid[0][0] = '0';
     grid[GRID_SIZE-1][GRID_SIZE-1] = '1';
 
-    // Desenha o tabuleiro inicial
-    lock_guard<mutex> lock(print_mtx);
-    print_queue.push({BOARD, -1});
-    print_cv.notify_one();
-
+    draw_board();
     return;
 }
 
@@ -101,7 +97,10 @@ void print_thread(void) {
         // Aguarda até que haja algo na fila de print ou o jogo termine
         print_cv.wait(lock, [] {return !print_queue.empty() || game_over;});
         
-        if(game_over && print_queue.empty()) break;
+        {
+            unique_lock gameover_lock(gameover_mtx);
+            if(game_over) break; 
+        }
         
         if(!print_queue.empty()) {
             PrintMessage msg = print_queue.front();
@@ -118,7 +117,7 @@ void print_thread(void) {
                     cout << "JOGADOR " << msg.player_id << " SAIU DA ZONA!\n";
                     break;
                 case PLAYER_WON:
-                    cout << "JOGADOR " << msg.player_id << " VENCEU! PRESSIONE [ENTER] PARA ENCERRAR...\n";
+                    cout << "JOGADOR " << msg.player_id << " VENCEU!\n";
                     break;
             }
         }
@@ -143,10 +142,11 @@ void input_thread(void) {
         queue_cv.notify_all();
         // Verifica o input de saída
         if (move == 'x') {
+            { // Atualiza a variável de game over
+               unique_lock<mutex> gameover_lock(gameover_mtx); 
+               game_over = true;
+            }
             // Notifica todas as threads em espera que o jogo terminou
-            unique_lock<mutex> gameover_lock(gameover_mtx);
-            game_over = true;
-            gameover_lock.unlock();
             queue_cv.notify_all();
             zone_cv.notify_all();
             print_cv.notify_all();
@@ -177,15 +177,14 @@ bool in_zone(bool player_id) {
 void zone_thread() {
     int last_winning_player = -1;
     while(!game_over) {
-        unique_lock<mutex> gameover_lock(gameover_mtx);
-        gameover_lock.unlock();
         unique_lock<mutex> zone_lock(zone_mtx);
         // Aguarda um jogador entrar na zona
         zone_cv.wait(zone_lock, [] {return zone_state != -1 || game_over;});
 
-        gameover_lock.lock();
-        if(game_over) break;
-        gameover_lock.unlock();
+        {
+            unique_lock gameover_lock(gameover_mtx);
+            if(game_over) break; 
+        }
 
         // Zona está ocupada
         last_winning_player = zone_state;
@@ -196,19 +195,21 @@ void zone_thread() {
         bool interruption = zone_cv.wait_until(zone_lock, win_time, [last_counter]{
             return zone_change_counter != last_counter || game_over;});
 
-        gameover_lock.lock();
-        if(game_over) break;
-        gameover_lock.unlock();
+        {
+            unique_lock gameover_lock(gameover_mtx);
+            if(game_over) break; 
+        }
 
         if(!interruption) {
             // Envia mensagem de vitória para a thread de print
             lock_guard<mutex> print_lock(print_mtx);
             print_queue.push({PLAYER_WON, last_winning_player});
             print_cv.notify_one();
-            
-            gameover_lock.lock();
-            game_over = true;
-            gameover_lock.unlock();
+            { // Atualiza a variável game over
+                unique_lock gameover_lock(gameover_mtx);
+                game_over = true; 
+            }
+            // Notifica todas as threads em espera que o jogo terminou
             zone_lock.unlock();
             queue_cv.notify_all();
             print_cv.notify_all();
@@ -230,15 +231,14 @@ void zone_thread() {
 void player_thread(bool player_id) {
     while(!game_over) {
         unique_lock<mutex> player_lock(player_mtx);
-        unique_lock<mutex> gameover_lock(gameover_mtx);
-        gameover_lock.unlock();
 
         // Aguarda até que a fila não esteja vazia OU que o jogo termine
         queue_cv.wait(player_lock, [player_id]{return !player_queue[player_id].empty() || game_over;}); 
             
-        gameover_lock.lock();
-        if(game_over) break;
-        gameover_lock.unlock();
+        {
+            unique_lock gameover_lock(gameover_mtx);
+            if(game_over) break; 
+        }
 
         char move = player_queue[player_id].front();
         player_queue[player_id].pop();
