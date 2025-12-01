@@ -138,7 +138,7 @@ void print_thread(void) {
             if(win) {
                 unique_lock<mutex> zone_lock(zone_mtx);
                 if(zone_state != -1) {
-                    cout << "PROCESSO " << zone_state << " FOI EXECUTADO COM SUCESSO! PRESSIONE [ENTER] PARA SAIR.\n";
+                    cout << "PROCESSO " << zone_state << " FOI EXECUTADO COM SUCESSO! PRESSIONE QUALQUER TECLA PARA SAIR.\n";
                 }
                 break;
             }
