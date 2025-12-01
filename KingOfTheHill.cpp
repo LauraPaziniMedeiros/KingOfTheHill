@@ -1,3 +1,11 @@
+/*
+AUTORES
+Artur Kenzo Obara Kawazoe		15652663
+Fernando Valentim Torres		15452340
+Laura Pazini Medeiros		    15468452
+Pedro Henrique Perez Dias		15484075
+*/
+
 #include <iostream>
 #include <thread>
 #include <mutex>
@@ -131,7 +139,7 @@ bool in_zone(bool player_id) {
 }
 
 /**
- * @brief Verifica se a condição de fim de jogo foi alterada para verdadeiro
+ * @brief Verifica se a condição de fim de jogo foi alterada para verdadeiro. Garante exclusão mútua.
  * @return true se o jogo terminou, false, caso contrário
  */
  bool is_gameover(void) {
@@ -141,7 +149,7 @@ bool in_zone(bool player_id) {
  }
 
  /**
- * @brief Verifica se a condição de vitória foi alterada para verdadeiro
+ * @brief Verifica se a condição de vitória foi alterada para verdadeiro. Garante exclusão mútua.
  * @return true se o último jogador na zona crítica venceu, false, caso contrário
  */
  bool is_win(void) {
