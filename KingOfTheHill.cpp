@@ -304,7 +304,7 @@ void player_thread(bool player_id) {
             bool p1_inside = in_zone(1);
             if(!p0_inside && !p1_inside) { // Nenhum dos jogadores está na zona
                 zone_state = -1;
-                // zone_change_counter++;
+                zone_change_counter++;
                 zone_lock.unlock();
                 zone_cv.notify_one();
             } // Pelo menos um dos jogadores está na zona
