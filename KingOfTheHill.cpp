@@ -138,7 +138,7 @@ void print_thread(void) {
             if(win) {
                 unique_lock<mutex> zone_lock(zone_mtx);
                 if(zone_state != -1) {
-                    cout << "JOGADOR " << zone_state << " VENCEU! PRESSIONE [ENTER] PARA SAIR.\n";
+                    cout << "JOGADOR " << zone_state << " VENCEU! PRESSIONE QUALQUER TECLA PARA SAIR.\n";
                 }
                 break;
             }
@@ -154,7 +154,11 @@ void print_thread(void) {
 }
 
 void input_thread(void) {
-    while(!game_over) {
+    while(true) {
+        {
+            unique_lock<mutex> gameover_lock(gameover_mtx);
+            if(game_over) break; 
+        }
         char move = get_immediate_input();
         lock_guard<mutex> player_lock(player_mtx);
         switch(move) {
@@ -186,7 +190,7 @@ void input_thread(void) {
 
 void zone_thread() {
     int last_winning_player = -1;
-    while(!game_over) {
+    while(true) {
         unique_lock<mutex> zone_lock(zone_mtx);
         // Aguarda um jogador entrar na zona
         zone_cv.wait(zone_lock, [] {return zone_state != -1 || game_over;});
@@ -234,7 +238,7 @@ void zone_thread() {
 }
 
 void player_thread(bool player_id) {
-    while(!game_over) {
+    while(true) {
         unique_lock<mutex> player_lock(player_mtx);
 
         // Aguarda até que a fila não esteja vazia OU que o jogo termine
