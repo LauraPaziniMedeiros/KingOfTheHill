@@ -100,7 +100,6 @@ void initialize_grid(void) {
     return;
 }
 
-// Empurra o jogador 
 /**
  * @brief Empurra o jogador adjacente à movimentação de outro jogador
  * @param r Posição do jogador na linha
@@ -120,7 +119,6 @@ void push_player(int r, int c, char direction, char player) {
     players[player - '0'] = {r, c};
 }
 
-// Retorna TRUE se o jogador está dentro da zona, FALSE caso contrário
 /**
  * @brief Verifica se o jogador está dentro da zona crítica
  * @param player_id ID do jogador
