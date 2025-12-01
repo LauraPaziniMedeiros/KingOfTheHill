@@ -156,14 +156,14 @@ void print_thread(void) {
             if(win) {
                 unique_lock<mutex> zone_lock(zone_mtx);
                 if(zone_state != -1) {
-                    cout << "JOGADOR " << zone_state << " VENCEU! PRESSIONE [ENTER] PARA SAIR.\n";
+                    cout << "PROCESSO " << zone_state << " FOI EXECUTADO COM SUCESSO! PRESSIONE [ENTER] PARA SAIR.\n";
                 }
                 break;
             }
             else {
                 unique_lock<mutex> zone_lock(zone_mtx);
                 if(zone_state != -1)
-                    cout << "JOGADOR " << zone_state << " ESTÁ NA ZONA!\n";
+                    cout << "PROCESSO " << zone_state << " ESTÁ NA ZONA CRÍTICA!\n";
             }
             if(game_over) break;
         }
