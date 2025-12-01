@@ -120,7 +120,7 @@ bool in_zone(bool player_id) {
 /*************** THREADS ***************/
 
 void print_thread(void) {
-    while(!game_over) {
+    while(true) {
         unique_lock<mutex> print_lock(print_mtx);
         // Aguarda um sinal para imprimir uma atualização no estado do jogo
         print_cv.wait(print_lock, []{return print || game_over || win;});
