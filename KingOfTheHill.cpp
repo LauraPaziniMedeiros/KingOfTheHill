@@ -27,9 +27,9 @@ const int zone_end = zone_start + ZONE_SIZE;
 string separator = "-";
 vector<vector<char>> original_grid(GRID_SIZE, vector<char>(GRID_SIZE)); // Restaura valores originais na movimentação
 
-/*************** VARIÁVEIS COMPARTILHADAS (ZONAS CRÍTCAS) ***************/
+/*************** VARIÁVEIS COMPARTILHADAS (REGIÕES CRÍTCAS) ***************/
 
-// Variáveis relacionadas à zona do jogo
+// Variáveis relacionadas à zona crítica (hill) do jogo
 condition_variable zone_cv; // Sinaliza quando um jogador entra na zona
 int zone_state = -1; // -1 = zona vazia, 0 = jogador 0 está na zona, 1 = jogador 1 está na zona
 int zone_change_counter = 0; // Contador para mudança de estado. É usado para acordar a zone_thread.
@@ -38,7 +38,7 @@ mutex zone_mtx; // Atua como um semáforo binário
 // Variáveis relacionadas ao input e lógica de movimentação dos jogadores
 vector<vector<char>> grid(GRID_SIZE, vector<char>(GRID_SIZE)); // Estado atual do tabuleiro
 vector<pair<int, int>> players = {{0, 0}, {GRID_SIZE - 1, GRID_SIZE - 1}}; // Posição de cada jogador no tabuleiro
-vector<queue<char>> player_queue(2); // Fila que guarda a sequência de movimentos de cada jogador
+vector<queue<char>> player_queue(2); // Fila que guarda a sequência de movimentos (inputs) de cada jogador
 condition_variable queue_cv; // Sinaliza um novo input na fila de movimentos
 mutex player_mtx; // Atua como um semáforo binário
 
@@ -54,7 +54,9 @@ mutex print_mtx; // Atua como um semáforo binário
 
 /*************** FUNÇÕES AUXILIARES ***************/
 
-// Desenha o estado atual do tabuleiro
+/**
+ * @brief Imprime o estado atual do tabuleiro
+ */
 void draw_board(void) {
     clear();
     cout << separator << endl;
@@ -75,7 +77,9 @@ void draw_board(void) {
     return;
 }
 
-// Inicializa o tabuleiro antes do jogo começar
+/**
+ * @brief Inicializa o tabuleiro antes do jogo começar
+ */
 void initialize_grid(void) {
     for(int i = 0; i < GRID_SIZE; i++) {
         for(int j = 0; j < GRID_SIZE; j++) {
@@ -88,7 +92,7 @@ void initialize_grid(void) {
             original_grid[i][j] = '*';
         }
     }
-    grid = original_grid;
+    grid = original_grid; // Copia o tabuleiro original para o atual
     grid[0][0] = '0';
     grid[GRID_SIZE-1][GRID_SIZE-1] = '1';
 
@@ -96,7 +100,14 @@ void initialize_grid(void) {
     return;
 }
 
-// Empurra o jogador adjacente à movimentação de outro jogador
+// Empurra o jogador 
+/**
+ * @brief Empurra o jogador adjacente à movimentação de outro jogador
+ * @param r Posição do jogador na linha
+ * @param c Posição do jogador na coluna
+ * @param direction Direção do movimento do jogador
+ * @param playar Símbolo do jogador no tabuleiro
+ */
 void push_player(int r, int c, char direction, char player) {
     switch (direction) {
         case 'w': r = (r == 0) ? (GRID_SIZE - 1) : r - 1; break;
@@ -110,8 +121,12 @@ void push_player(int r, int c, char direction, char player) {
 }
 
 // Retorna TRUE se o jogador está dentro da zona, FALSE caso contrário
+/**
+ * @brief Verifica se o jogador está dentro da zona crítica
+ * @param player_id ID do jogador
+ * @return true se o jogador está dentro da zona, false caso contrário
+ */
 bool in_zone(bool player_id) {
-    if(player_id == -1) return false;
     int x = players[player_id].first;
     int y = players[player_id].second;
     return x >= zone_start && x < zone_end && y >= zone_start && y < zone_end;
@@ -119,6 +134,9 @@ bool in_zone(bool player_id) {
 
 /*************** THREADS ***************/
 
+/**
+ * @brief Thread de output do jogo. Imprime o tabuleiro atual e o estado da zona crítica.
+ */
 void print_thread(void) {
     while(!game_over) {
         unique_lock<mutex> print_lock(print_mtx);
@@ -153,6 +171,9 @@ void print_thread(void) {
     }
 }
 
+/**
+ * @brief Thread de input para registrar a movimentação dos jogadores e o fim de jogo
+ */
 void input_thread(void) {
     while(!game_over) {
         char move = get_immediate_input();
@@ -184,6 +205,10 @@ void input_thread(void) {
     }
 }
 
+/**
+ * @brief Thread de verificação do estado atual da zona crítica. Conta o tempo que um jogador 
+ * permaneceu dentro da zona e eventuais mudanças de estado.
+ */
 void zone_thread() {
     int last_winning_player = -1;
     while(!game_over) {
@@ -198,7 +223,7 @@ void zone_thread() {
 
         // Zona está ocupada
         last_winning_player = zone_state;
-        auto win_time = chrono::steady_clock::now() + WIN_DURATION;
+        auto win_time = chrono::steady_clock::now() + WIN_DURATION; // Começa um contador para o tempo de vitória
 
         // Espera uma interrupção ou o tempo para a vitória do jogador
         int last_counter = zone_change_counter;
@@ -210,7 +235,7 @@ void zone_thread() {
             if(game_over) break; 
         }
 
-        if(!interruption && last_winning_player == zone_state) {
+        if(!interruption && last_winning_player == zone_state) { // Vitória
             { // Atualiza as variáveis de fim de jogo
                 unique_lock gameover_lock(gameover_mtx);
                 game_over = true;
@@ -233,6 +258,9 @@ void zone_thread() {
     }
 }
 
+/**
+ * @brief Thread de movimentação dos jogadores e atualização do estado do tabuleiro.
+ */
 void player_thread(bool player_id) {
     while(!game_over) {
         unique_lock<mutex> player_lock(player_mtx);
